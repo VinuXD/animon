@@ -53,6 +53,8 @@ button:disabled{opacity:.55;cursor:wait;transform:none}
 #info,#sound{flex:0 0 clamp(40px,6dvh,46px);padding:0;font-size:19px;font-weight:400;letter-spacing:0;color:var(--gold);background:#ffffff12;border-color:#e8c56d66}
 #info:hover,#sound:hover{background:#ffffff20}
 .hint{text-align:center;color:#c4bdd9;font-size:10px;margin:clamp(6px,1.4dvh,11px) 0 0;min-height:1.3em}
+.hint a{color:var(--gold);text-underline-offset:2px}
+.hint a:hover{color:#fff}
 .hint.error{color:#ffb9a8;font-size:11px}
 #loader{position:fixed;inset:0;z-index:30;display:grid;place-items:center;text-align:center;background:#080b18eF;backdrop-filter:blur(13px);opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s}
 #loader.active{opacity:1;visibility:visible}
@@ -375,7 +377,7 @@ function reveal(data,el,version){
  $("quote").textContent=data.quote;
  $("rarity").textContent="★ "+rarity;$("rarity").className="rarity "+rarity.toLowerCase();
  $("serial").textContent="No. "+String(data.id).padStart(5,"0");
- $("hint").textContent="";$("hint").className="hint";
+ $("hint").innerHTML='Liked it? <a href="https://github.com/VinuXD/animon/" target="_blank" rel="noopener noreferrer">Star the repo animon in github?</a>';$("hint").className="hint";
  $("card").className="card element-"+el.cls;
  currentCard={image:data.image,id:data.id,name:nameOf(c),series:data.series,quote:data.quote,rarity};
  atmosphere();closeLoader();revealSound(el);
