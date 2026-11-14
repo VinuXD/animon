@@ -306,37 +306,50 @@ function rarityFor(item){
  const f=Number(item.favorites||0);
  if(f>30000)return "MYTHIC";if(f>10000)return "LEGENDARY";if(f>2500)return "EPIC";if(f>500)return "RARE";return "COMMON";
 }
-const quoteCache=new Map();
+const quoteCache=new Map();let quoteLimited=false,lastError="";
+try{for(const [k,v] of JSON.parse(localStorage.getItem("animon.quotes")||"[]"))if(k&&v?.content)quoteCache.set(k,v)}catch(e){}
+let noQuote={},quoteBlockUntil=0;
+try{
+ noQuote=JSON.parse(localStorage.getItem("animon.noquote")||"{}");quoteBlockUntil=Number(localStorage.getItem("animon.quoteBlock"))||0;
+ for(const k in noQuote){if(Date.now()-noQuote[k]<6048e5)quoteCache.set(k,null);else delete noQuote[k]}
+}catch(e){}
+function markNoQuote(key){quoteCache.set(key,null);noQuote[key]=Date.now();try{localStorage.setItem("animon.noquote",JSON.stringify(noQuote))}catch(e){}}
+function limitMsg(){const m=Math.max(1,Math.ceil((quoteBlockUntil-Date.now())/60000));return "The quote service's rate limit was reached. Try again in about "+m+" min."}
+function saveQuotes(){try{localStorage.setItem("animon.quotes",JSON.stringify([...quoteCache].filter(([,v])=>v)))}catch(e){}}
+const hasCachedQuotes=()=>[...quoteCache.values()].some(Boolean);
 async function getSeriesQuote(series){
  const key=normalTitle(series);
  if(!key)return null;
  if(quoteCache.has(key))return quoteCache.get(key);
+ if(quoteLimited)return null; // rate limited: only cached series can be used
  try{
   const response=await fetch("https://api.animechan.io/v1/quotes/random?anime="+encodeURIComponent(series),{signal:AbortSignal.timeout(9000),headers:{Accept:"application/json"}});
-  if(response.status===404){quoteCache.set(key,null);return null}
-  if(!response.ok)throw Error("Quote API HTTP "+response.status);
+  if(response.status===404){markNoQuote(key);return null}
+  if(response.status===429){quoteLimited=true;lastError="quote API rate limit reached";quoteBlockUntil=Date.now()+Math.max(60,Math.min(3600,Number(response.headers.get("Retry-After"))||1200))*1000;try{localStorage.setItem("animon.quoteBlock",String(quoteBlockUntil))}catch(e){}return null}
+  if(!response.ok)throw Error("quote API HTTP "+response.status);
   const payload=await response.json(),q=payload?.data;
   const returned=normalTitle(q?.anime?.name),content=String(q?.content||"").trim();
   if(payload?.status!=="success"||!content||!returned||!(returned===key||returned.includes(key)||key.includes(returned))){
-   quoteCache.set(key,null);return null; // quote does not belong to this series
+   markNoQuote(key);return null; // quote does not belong to this series
   }
   const result={content,anime:q.anime.name};
-  quoteCache.set(key,result);return result;
+  quoteCache.set(key,result);saveQuotes();return result;
  }catch(error){
   console.warn("Quote service error for "+series,error);
-  serviceErrors++; // transient failures are not cached
+  lastError=error.message||"quote API unreachable";serviceErrors++; // transient failures are not cached
   return null;
  }
 }
 function checkServiceHealth(){
- if(serviceErrors>=MAX_SERVICE_ERRORS)throw Error("The anime or quote service is not responding. Please try again in a moment.");
+ if(quoteLimited&&!hasCachedQuotes())throw Error(limitMsg());
+ if(serviceErrors>=MAX_SERVICE_ERRORS)throw Error("The anime or quote service is not responding"+(lastError?" ("+lastError+")":"")+". Please try again in a moment.");
 }
 async function validateCandidate(item,id,allowGallery){
  const image=await findArtwork(item,id,allowGallery);
  if(!image)return null;
  checkServiceHealth();
  let series;
- try{series=await getCharacterAnimeography(id)}catch(error){serviceErrors++;console.warn("Animeography unavailable",id,error);return null}
+ try{series=await getCharacterAnimeography(id)}catch(error){serviceErrors++;lastError="character API: "+(error.message||"unreachable");console.warn("Animeography unavailable",id,error);return null}
  for(const name of series.slice(0,MAX_SERIES_PER_CHARACTER)){
   const quote=await getSeriesQuote(name);
   if(quote)return {item,id,image,series:name,quote:quote.content};
@@ -345,7 +358,7 @@ async function validateCandidate(item,id,allowGallery){
  return null;
 }
 async function getRandomCharacter(version){
- serviceErrors=0;
+ serviceErrors=0;lastError="";quoteLimited=Date.now()<quoteBlockUntil;checkServiceHealth();
  let checks=0;
  for(let p=0;p<MAX_PAGES&&checks<MAX_CHECKS;p++){
   if(!catalogueHasNext&&cataloguePage>1){cataloguePage=1;catalogueHasNext=true}
@@ -366,7 +379,7 @@ async function getRandomCharacter(version){
    if(result){previousId=id;return result}
   }
  }
- throw Error("No character with artwork, series and a verified quote was found. Try another pull.");
+ throw Error(quoteLimited?limitMsg():"No character with artwork, series and a verified quote was found. Try another pull.");
 }
 function reveal(data,el,version){
  if(version!==requestId)return;
@@ -394,6 +407,7 @@ async function showCard(){
   if(version===requestId){
    // The loader stays up for the whole search; the error appears only once it is exhausted.
    closeLoader();
+   if(!currentCard){$("name").textContent="Discovery paused";$("series").textContent="ANIMON"}
    $("hint").textContent=error.message||"The character search failed. Try again.";$("hint").className="hint error";
   }
  }
